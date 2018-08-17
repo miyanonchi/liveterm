@@ -1,121 +1,52 @@
-package liveterm
+package main
 
 import (
-    "log"
-    "net/http"
+  "os"
+  "os/signal"
+  "syscall"
+  "log"
 
-    "golang.org/x/net/websocket"
+  "./liveterm"
 )
 
-// Chat server.
-type Server struct {
-    pattern      string
-    clients        map[int]*Client
-    sessions     map[int]*Session
-    clientAddCh    chan *Client
-    clientDelCh    chan *Client
-    sessionAddCh chan *Session
-    sessionDelCh chan *Session
-    doneCh       chan bool
-    errCh        chan error
-}
+func main() {
+    // サーバーオブジェクト
+    server := liveterm.NewServer("/ws")
 
-// Create new chat server.
-func NewServer(pattern string) *Server {
-    clients      := make(map[int]*Client)
-    sessions     := make(map[int]*Session)
-    clientAddCh  := make(chan *Client)
-    clientDelCh  := make(chan *Client)
-    sessionAddCh := make(chan *Session)
-    sessionDelCh := make(chan *Session)
-    doneCh       := make(chan bool)
-    errCh        := make(chan error)
+    signalCh := make(chan os.Signal, 1)
 
-    return &Server{
-        pattern,
-        clients,
-        sessions,
-        clientAddCh,
-        clientDelCh,
-        sessionAddCh,
-        sessionDelCh,
-        doneCh,
-        errCh,
-    }
-}
+    signal.Notify(signalCh,
+            syscall.SIGHUP,
+            syscall.SIGINT,
+            syscall.SIGTERM,
+            syscall.SIGQUIT)
 
-func (s *Server) SessionAdd(c *Session) {
-    s.sessionAddCh <- c
-}
+    // シグナルをキャッチ!
+    go func() {
+        for {
+            s := <-signalCh
 
-func (s *Server) SessionDel(c *Session) {
-    s.sessionDelCh <- c
-}
-
-func (s *Server) ClientAdd(c *Client) {
-    s.clientAddCh <- c
-}
-
-func (s *Server) ClientDel(c *Client) {
-    s.clientDelCh <- c
-}
-
-func (s *Server) Done() {
-    s.doneCh <- true
-}
-
-func (s *Server) Err(err error) {
-    s.errCh <- err
-}
-
-// Listen and serve.
-// It serves client connection and broadcast request.
-func (s *Server) Listen() {
-
-    log.Println("Listening server...")
-
-    // websocket handler
-    onConnected := func(ws *websocket.Conn) {
-        defer func() {
-            err := ws.Close()
-            if err != nil {
-                s.errCh <- err
+            switch s {
+            // kill -SIGHUP XXXX
+            case syscall.SIGHUP:
+                log.Println("SIGHUP")
+                server.Shutdown()
+                server.Listen()
+            // kill -SIGINT XXXX or Ctrl+c
+            case syscall.SIGINT:
+                log.Println("SIGINT")
+                server.Shutdown()
+            // kill -SIGTERM XXXX
+            case syscall.SIGTERM:
+                log.Println("SIGTERM")
+                server.Shutdown()
+            // kill -SIGQUIT XXXX
+            case syscall.SIGQUIT:
+                log.Println("SIGQUIT")
+                server.Shutdown()
             }
-        }()
-
-        client := NewClient(ws, s)
-        s.Add(client)
-        client.Listen()
-    }
-    http.Handle(s.pattern, websocket.Handler(onConnected))
-    log.Println("Created handler")
-
-    for {
-        select {
-
-        // Add new a client
-        case c := <-s.addCh:
-            log.Println("Added new client")
-            s.clients[c.id] = c
-            log.Println("Now", len(s.clients), "clients connected.")
-            s.sendPastMessages(c)
-
-        // del a client
-        case c := <-s.delCh:
-            log.Println("Delete client")
-            delete(s.clients, c.id)
-
-        // broadcast message for all clients
-        case msg := <-s.sendAllCh:
-            log.Println("Send all:", msg)
-            //s.messages = append(s.messages, msg)
-            s.sendAll(msg)
-
-        case err := <-s.errCh:
-            log.Println("Error:", err.Error())
-
-        case <-s.doneCh:
-            return
         }
-    }
+    }()
+
+    server.Listen()
 }

@@ -1,0 +1,24 @@
+version: '2'
+services:
+  server:
+    build: .
+    tty: true
+    ports:
+      - "8080:8080"
+    volumes:
+      - .:/liveterm
+      - ./sessions:/sessions
+    user: "${UID}:${GID}"
+    command: go run /liveterm/server.go
+#    depends_on:
+#     - redis
+#  redis:
+#    image: redis
+
+  client:
+    build: .
+    tty: true
+    volumes:
+      - .:/liveterm
+    user: "${UID}:${GID}"
+    command: go run /liveterm/client.go
